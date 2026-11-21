@@ -6,7 +6,7 @@ import { qaChecks } from '../engine/score';
 import { recommend, Reco, RecoContext } from '../engine/reco';
 import { matchCrop, matchSystem } from '../engine/agronomy';
 import { parseLabDocx, parseSampleCsv, parseValue, parseDate, toCsv, CSV_COLUMNS, CSV_META } from '../engine/labreport';
-import { useApp, AppData, Scored, Panel, Rating, Status, Chip, F, Modal, Empty, Seg, SoilGlyph, HBars, Histogram, RatingBar, ScoreMix, fmt, fmtDate, valText, farmName, ratingLabel, download, go, SYSTEMS, BASE, RATING_COL, tip } from './core';
+import { useApp, AppData, Scored, Panel, Rating, Status, Chip, F, Modal, Empty, Seg, ScoreRing, HBars, Histogram, RatingBar, ScoreMix, fmt, fmtDate, valText, farmName, ratingLabel, download, go, SYSTEMS, BASE, RATING_COL, tip } from './core';
 
 export function ctxFor(sc: Scored, data: AppData): RecoContext {
   return { texture: sc.s.texture || undefined, crop: data.crops.find(c => c.id === sc.s.crop_id), system: sc.s.system, water: data.water.find(w => w.id === sc.s.water_id)?.values, bd: sc.s.values.bd, minCoverage: data.meth.data.minCoverage };
@@ -185,13 +185,13 @@ export function SampleDetail({ id }: { id: number }) {
       <div className="grid g-main">
         <Panel>
           <div className="hero">
-            <div className="center"><SoilGlyph m={m} res={res} size={230} /></div>
+            <div className="center"><ScoreRing score={res.score} rating={res.rating} size={220} /></div>
             <div>
-              <div className="score">{fmt(res.score, 1)}<small> / 100</small></div>
-              <div className="row" style={{ margin: '10px 0 6px' }}><Rating m={m} k={res.rating} /><span className="mute">{rating?.meaning}</span></div>
-              <div className="small mute" style={{ marginTop: 12 }}>Data coverage {fmt(res.coverage, 0)}% of scorecard weight{res.coverage < m.minCoverage ? `, below the ${m.minCoverage}% recommended` : ''}</div>
+              <div className="row" style={{ marginBottom: 8 }}><Rating m={m} k={res.rating} /></div>
+              <p style={{ fontSize: 16, maxWidth: 420 }}>{rating?.meaning ?? 'No indicators measured yet.'}</p>
+              <div className="small mute" style={{ marginTop: 14 }}>Data coverage {fmt(res.coverage, 0)}% of scorecard weight{res.coverage < m.minCoverage ? `, below the ${m.minCoverage}% recommended` : ''}</div>
               <div className="meter" style={{ marginTop: 5, maxWidth: 320 }}><i style={{ width: `${res.coverage}%`, background: res.coverage < m.minCoverage ? 'var(--serious)' : 'var(--io)' }} /></div>
-              <p className="small mute" style={{ marginTop: 14, maxWidth: 420 }}>Each line in the disc is one indicator; its length is the score from 1 to 5. A full, even shape is a healthy soil.</p>
+              <p className="small mute" style={{ marginTop: 14, maxWidth: 420 }}>{res.indicators.filter(i => i.score !== undefined).length} of {m.indicators.length} indicators measured; {res.indicators.filter(i => (i.score ?? 5) <= 2).length} are limiting (score 1 or 2).</p>
             </div>
           </div>
         </Panel>
@@ -367,14 +367,11 @@ export function SampleReport({ sc, lang }: { sc: Scored; lang: 'en' | 'ar' | 'bo
         <div><span>Sampled</span>{fmtDate(s.sampled_on)}</div><div><span>Received</span>{fmtDate(s.received_on)}</div><div><span>Analysed</span>{fmtDate(s.analysed_on)}</div><div><span>Report date</span>{fmtDate(new Date().toISOString())}</div>
       </div>
       <div className="rep-score avoid">
-        <div className="center"><SoilGlyph m={m} res={res} size={132} /></div>
+        <div className="center"><ScoreRing score={res.score} rating={res.rating} size={124} /></div>
         <div>
-          <div className="row" style={{ alignItems: 'baseline', gap: 14, flexWrap: 'wrap' }}>
-            <span className="big">{fmt(res.score, 1)}</span><span className="mute">/ 100</span>
-            {rating && <span style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: '14pt', color: RATING_COL[rating.key] }}>{en && rating.en}{lang === 'both' && ' | '}{ar && <span style={{ fontFamily: 'IBM Plex Sans Arabic' }}>{rating.ar}</span>}</span>}
-          </div>
+          {rating && <div style={{ fontFamily: 'var(--display)', fontWeight: 700, fontSize: '17pt', color: RATING_COL[rating.key] }}>{en && rating.en}{lang === 'both' && ' | '}{ar && <span style={{ fontFamily: 'IBM Plex Sans Arabic' }}>{rating.ar}</span>}</div>}
           <div style={{ fontSize: '9pt', marginTop: 4 }}>{en && <div>{rating?.meaning}. Data coverage {fmt(res.coverage, 0)}% of scorecard weight.</div>}{ar && <div className="ar">{rating?.meaningAr}. تغطية البيانات {fmt(res.coverage, 0)}٪ من وزن بطاقة التقييم.</div>}</div>
-          <div style={{ display: 'flex', gap: 3, marginTop: 8 }}>{[...m.ratings].reverse().map((r, i, arr) => <div key={r.key} style={{ flex: (arr[i + 1]?.min ?? 100) - r.min, fontSize: '7.5pt', textAlign: 'center' }}><div style={{ height: 5, borderRadius: 3, background: RATING_COL[r.key], opacity: r.key === res.rating ? 1 : 0.3 }} />{r.en} {r.min}+</div>)}</div>
+          <div style={{ display: 'flex', gap: 3, marginTop: 10 }}>{[...m.ratings].reverse().map((r, i, arr) => <div key={r.key} style={{ flex: (arr[i + 1]?.min ?? 100) - r.min, fontSize: '7.5pt', textAlign: 'center' }}><div style={{ height: 5, borderRadius: 3, background: RATING_COL[r.key], opacity: r.key === res.rating ? 1 : 0.3 }} />{r.en} {r.min}+</div>)}</div>
         </div>
       </div>
 

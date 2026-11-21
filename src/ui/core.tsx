@@ -65,29 +65,15 @@ export function Modal({ title, onClose, children, footer, wide }: { title: strin
 export const Empty = ({ title, children }: { title: string; children?: ReactNode }) => <div className="empty"><h3>{title}</h3><div>{children}</div></div>;
 export const Seg = <T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: [T, string][] }) => <div className="seg">{options.map(([v, l]) => <button key={v} className={v === value ? 'on' : ''} onClick={() => onChange(v)}>{l}</button>)}</div>;
 
-// ---------------------------------------------------------------- soil signature glyph
-// Echoes the Innovation Oasis mark: each of the scorecard indicators is one vein inside the disc,
-// and the vein's length is that indicator's score (1-5). A full, even lens is a healthy soil.
-export function SoilGlyph({ m, res, size = 220, mono }: { m: Methodology; res: ScoreResult; size?: number; mono?: boolean }) {
-  const R = 100, n = m.indicators.length, top = -62, step = 124 / (n - 1);
+// ---------------------------------------------------------------- score ring
+export function ScoreRing({ score, rating, size = 200 }: { score?: number; rating?: string; size?: number }) {
+  const R = 84, C = 2 * Math.PI * R, frac = Math.max(0, Math.min(1, (score ?? 0) / 100));
   return (
-    <svg viewBox="-110 -110 220 220" width={size} height={size} role="img" aria-label="Soil signature: one line per indicator, longer is better">
-      <circle r={R} fill={mono ? '#fff' : 'var(--io)'} stroke={mono ? 'var(--io)' : 'none'} strokeWidth={mono ? 3 : 0} />
-      <circle cx={0} cy={-80} r={5.5} fill={mono ? 'var(--io)' : '#fff'} /><circle cx={0} cy={80} r={5.5} fill={mono ? 'var(--io)' : '#fff'} />
-      {m.indicators.map((ind, i) => {
-        const y = top + i * step, sc = res.byKey[ind.key]?.score;
-        const half = Math.sqrt(R * R - y * y) * 0.78 * Math.sin(Math.PI * (0.18 + 0.64 * (i / (n - 1)))) ** 0.6;
-        const len = half * (sc ? 0.2 + 0.8 * (sc / 5) : 0.2), side = i % 2 ? 1 : -1;
-        const col = mono ? 'var(--io)' : '#fff';
-        const label = `${INDICATOR_LABEL[ind.key]?.en ?? ind.key}: ${sc ? `${fmt(res.byKey[ind.key].value, ANALYTE[analyteOf(ind.key)]?.dp ?? 2)} - score ${sc} of 5` : 'not measured'}`;
-        return (
-          <g key={ind.key} opacity={sc ? 1 : 0.4} {...tip(label)}>
-            <rect x={-half} y={y - step / 2} width={half * 2} height={step} fill="transparent" />
-            <line x1={-len} x2={len} y1={y} y2={y} stroke={col} strokeWidth={2.6} strokeLinecap="round" strokeDasharray={sc ? undefined : '1 6'} />
-            {sc && <circle cx={side * len} cy={y} r={3.6} fill={col} />}
-          </g>
-        );
-      })}
+    <svg viewBox="-100 -100 200 200" width={size} height={size} role="img" aria-label={score === undefined ? 'Not scored' : `Soil health score ${score.toFixed(1)} out of 100`}>
+      <circle r={R} fill="none" stroke="#e3e9f0" strokeWidth={14} />
+      {score !== undefined && <circle r={R} fill="none" stroke={rating ? RATING_COL[rating] : 'var(--io)'} strokeWidth={14} strokeLinecap="round" strokeDasharray={`${frac * C} ${C}`} transform="rotate(-90)" />}
+      <text y={8} textAnchor="middle" fontFamily="var(--display)" fontWeight={700} fontSize={46} fill="var(--navy)">{score === undefined ? '–' : score.toFixed(1)}</text>
+      <text y={34} textAnchor="middle" fontSize={15} fill="var(--mute)">out of 100</text>
     </svg>
   );
 }

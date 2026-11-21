@@ -7,8 +7,7 @@ project *Development of UAE Soil Health Metrics and UAE Soil Health Scorecard fo
 It turns a laboratory result into a 0–100 soil health score, shows what is limiting the soil,
 generates bilingual (English / Arabic) recommendations by rule, and prints an IO-branded report.
 
-**Live app:** enable GitHub Pages on the `docs/` folder of this repository (Settings → Pages →
-Deploy from a branch → `main` / `docs`).
+**Live app:** https://boukoftanebilal.github.io/io-soil-scorecard/ (GitHub Pages, served from the `docs/` folder).
 
 ## What it does
 
@@ -40,24 +39,29 @@ stored in the browser (IndexedDB). Tables: `users`, `farms`, `samples`, `results
 GitHub Pages serves static files only, so a database shared live between users needs a server.
 The data layer is isolated in `src/db/db.ts` to make that move straightforward.
 
-## Data and confidentiality
+## Sign-in and data
 
-`public/seed.enc.json` holds the Silal laboratory dataset (soil results and farm registry) encrypted
-with AES-256-GCM; the key is derived from an access key with PBKDF2-SHA-256 (600,000 iterations).
-The file cannot be read without the access key, which is **not** in this repository. On first run,
-choose *Silal dataset* and enter the key, or choose *Demonstration data* for invented farms.
+There is one screen: username and password. On a computer that does not hold the database yet,
+a correct sign-in also unlocks the Silal laboratory dataset shipped with the app and loads it, so
+the first sign-in takes a few seconds longer.
 
-The source laboratory reports are not part of the repository. To rebuild the bundle:
+* `public/seed.enc.json` holds the dataset (soil results and farm registry), AES-256-GCM encrypted
+  under a dataset key.
+* `public/keywrap.json` holds that dataset key, encrypted under a key derived from the username and
+  password (PBKDF2-SHA-256, 600,000 iterations).
+
+Neither the password, the dataset key nor readable data is in this repository, and the source
+laboratory reports are not part of it either. To change the sign-in, or to rebuild the dataset:
 
 ```bash
-npm run seed -- "<folder of .docx reports>" <list.json> "<access key>"
+npx tsx scripts/make-keywrap.ts <username> "<password>" "<full name>" "<dataset key>"
+npm run seed -- "<folder of .docx reports>" <list.json> "<dataset key>"
+npm run build
 ```
 
-## First run
-
-1. Open the app and choose what the database starts with (Silal dataset, demonstration data, a backup, or empty).
-2. Create the administrator account. There is no default password.
-3. Add colleagues under **Administration → Users**.
+After signing in, the administrator adds colleagues under **Administration → Users**. Changing a
+password there changes it on that computer; the sign-in that opens a new computer is the one in
+`keywrap.json`.
 
 ## Methodology
 
@@ -84,7 +88,7 @@ npm run build    # production build into docs/ (served by GitHub Pages)
 
 ```
 src/engine/   methodology, scoring, QA checks, agronomy tables, recommendation rules, report parser
-src/db/       SQLite schema and data access, encryption, demonstration data
+src/db/       SQLite schema and data access, encryption
 src/ui/       React interface (dashboard, samples, farms, water, reports, analytics, admin)
 scripts/      dataset bundle builder
 tests/        unit tests

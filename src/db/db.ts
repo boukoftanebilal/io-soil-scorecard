@@ -124,14 +124,20 @@ async function hashPw(pw: string, saltHex?: string) {
 }
 
 export interface SeedEnvelope { v: number; iter: number; salt: string; iv: string; ct: string }
-export async function decryptSeed(envelope: SeedEnvelope, accessKey: string): Promise<unknown> {
-  const bits = await pbkdf2(accessKey.trim(), unhex(envelope.salt), envelope.iter);
+async function openEnvelope(envelope: SeedEnvelope, secret: string): Promise<Uint8Array> {
+  const bits = await pbkdf2(secret, unhex(envelope.salt), envelope.iter);
   const key = await crypto.subtle.importKey('raw', bits, 'AES-GCM', false, ['decrypt']);
   const ct = Uint8Array.from(atob(envelope.ct), c => c.charCodeAt(0));
-  let plain: ArrayBuffer;
-  try { plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unhex(envelope.iv) as BufferSource }, key, ct); }
-  catch { throw new Error('That access key does not unlock the dataset.'); }
-  return JSON.parse(new TextDecoder().decode(gunzipSync(new Uint8Array(plain))));
+  try { return new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unhex(envelope.iv) as BufferSource }, key, ct)); }
+  catch { throw new Error('Username or password is incorrect.'); }
+}
+/** The dataset bundle: gzip-compressed JSON encrypted under the dataset key. */
+export async function decryptSeed(envelope: SeedEnvelope, datasetKey: string): Promise<unknown> {
+  return JSON.parse(new TextDecoder().decode(gunzipSync(await openEnvelope(envelope, datasetKey.trim()))));
+}
+/** The sign-in wrap: the dataset key and account name, encrypted under "username:password". */
+export async function unwrapSignIn(envelope: SeedEnvelope, username: string, password: string): Promise<{ key: string; name: string }> {
+  return JSON.parse(new TextDecoder().decode(await openEnvelope(envelope, username.trim().toLowerCase() + ':' + password)));
 }
 
 // ---------------------------------------------------------------- users
