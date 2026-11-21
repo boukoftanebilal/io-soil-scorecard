@@ -27,7 +27,7 @@ function FarmMap({ farms, onPick }: { farms: { f: Farm; rating?: string; score?:
       if (f.lat == null || f.lon == null) continue;
       pts.push([f.lat, f.lon]);
       L.circleMarker([f.lat, f.lon], { radius: 8, color: '#fff', weight: 2, fillColor: rating ? RATING_HEX[rating] : '#7b8496', fillOpacity: 1 })
-        .bindTooltip(`${farmName(f)}${score !== undefined ? ` - latest score ${score.toFixed(1)}` : ' - not scored'}`).on('click', () => onPick(f.id)).addTo(map);
+        .bindTooltip(`${farmName(f)}${score !== undefined ? ` - latest score ${score.toFixed(1)}` : ' - not scored'}${f.loc_placeholder ? ' (placeholder location)' : ''}`).on('click', () => onPick(f.id)).addTo(map);
     }
     if (pts.length) map.fitBounds(L.latLngBounds(pts).pad(0.25));
     return () => { map.remove(); };
@@ -40,7 +40,7 @@ function FarmForm({ farm, onClose }: { farm?: Farm; onClose: () => void }) {
   const [f, setF] = useState<Record<string, string>>(() => Object.fromEntries(['farm_no', 'supply_no', 'owner', 'engineer', 'region', 'emirate', 'lat', 'lon', 'area_ha', 'irrigation_source', 'notes'].map(k => [k, String((farm as unknown as Record<string, unknown>)?.[k] ?? '')])));
   const set = (k: string) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => setF({ ...f, [k]: e.target.value });
   const n = (x: string) => (x.trim() === '' || isNaN(Number(x)) ? null : Number(x));
-  const save = () => { const id = db.saveFarm({ id: farm?.id, ...f, lat: n(f.lat), lon: n(f.lon), area_ha: n(f.area_ha) } as Partial<Farm>); db.audit(user.username, farm ? 'edit' : 'create', 'farm', f.farm_no || f.supply_no || String(id)); refresh(); toast('Farm saved'); onClose(); };
+  const save = () => { const moved = n(f.lat) !== (farm?.lat ?? null) || n(f.lon) !== (farm?.lon ?? null); const id = db.saveFarm({ id: farm?.id, ...f, lat: n(f.lat), lon: n(f.lon), area_ha: n(f.area_ha), loc_placeholder: moved ? 0 : farm?.loc_placeholder ?? 0 } as Partial<Farm>); db.audit(user.username, farm ? 'edit' : 'create', 'farm', f.farm_no || f.supply_no || String(id)); refresh(); toast('Farm saved'); onClose(); };
   return (
     <Modal title={farm ? 'Edit farm' : 'Add farm'} onClose={onClose} footer={<><button className="btn" onClick={onClose}>Cancel</button><button className="btn pri" onClick={save} disabled={!f.farm_no && !f.supply_no}>Save farm</button></>}>
       <div className="fields">
@@ -52,6 +52,7 @@ function FarmForm({ farm, onClose }: { farm?: Farm; onClose: () => void }) {
         <F label="Irrigation source"><input value={f.irrigation_source} onChange={set('irrigation_source')} list="sources" /><datalist id="sources">{['Borehole', 'Reverse osmosis', 'Municipal', 'Treated sewage effluent', 'Blended'].map(s => <option key={s} value={s} />)}</datalist></F>
         <F label="Notes" span={2}><textarea value={f.notes} onChange={set('notes')} /></F>
       </div>
+      {farm?.loc_placeholder ? <div className="flag warn" style={{ marginTop: 14 }}><span>This farm is shown at a placeholder location. Enter its surveyed latitude and longitude to replace it.</span></div> : null}
     </Modal>
   );
 }
@@ -62,18 +63,18 @@ export function FarmsPage() {
   const [q, setQ] = useState(''), [add, setAdd] = useState(false);
   const rows = useMemo(() => data.farms.map(f => { const xs = data.scored.filter(x => x.s.farm_id === f.id && x.res.score !== undefined); const l = latest(xs); return { f, n: data.samples.filter(s => s.farm_id === f.id).length, score: l?.res.score, rating: l?.res.rating, last: l?.s.analysed_on }; }), [data]);
   const shown = rows.filter(r => !q || `${r.f.farm_no} ${r.f.supply_no} ${r.f.owner} ${r.f.engineer} ${r.f.region}`.toLowerCase().includes(q.toLowerCase()));
-  const geo = data.farms.filter(f => f.lat != null && f.lon != null).length;
+  const geo = data.farms.filter(f => f.lat != null && f.lon != null).length, placed = data.farms.filter(f => f.lat != null && f.loc_placeholder).length;
   const pick = React.useCallback((id: number) => go(`/farms/${id}`), []);
   return (
     <div className="stack">
       <div className="row wrap spread no-print"><input style={{ width: 300 }} placeholder="Search farm, supply number, owner or engineer" value={q} onChange={e => setQ(e.target.value)} aria-label="Search farms" />{can('edit') && <button className="btn pri" onClick={() => setAdd(true)}>Add farm</button>}</div>
-      <Panel title="Farm locations" sub={`${geo} of ${data.farms.length} farms have a validated coordinate. Marker colour is the rating of the latest sample.`} flush>
+      <Panel title="Farm locations" sub={`${geo - placed} of ${data.farms.length} farms have a validated coordinate.${placed ? ` ${placed} are shown at placeholder locations in Abu Dhabi farming areas, for illustration only; they are not surveyed positions.` : ''} Marker colour is the rating of the latest sample.`} flush>
         {geo === 0 ? <Empty title="No farm has coordinates yet">Add latitude and longitude to a farm to place it on the map. Geolocation is what joins the registry, samples and scores to one physical location.</Empty> : <FarmMap farms={rows} onPick={pick} />}
         {geo > 0 && <div className="row wrap small" style={{ padding: '10px 16px', gap: 16 }}>{m.ratings.map(r => <span key={r.key} className="row" style={{ gap: 6 }}><i style={{ width: 10, height: 10, borderRadius: '50%', background: RATING_COL[r.key] }} />{r.en}</span>)}<span className="row" style={{ gap: 6 }}><i style={{ width: 10, height: 10, borderRadius: '50%', background: 'var(--mute)' }} />Not scored</span></div>}
       </Panel>
       <Panel flush>{shown.length === 0 ? <Empty title="No farms">Add a farm, or import laboratory reports to create farms from their supply numbers.</Empty> : <div className="scroll"><table className="tbl">
         <thead><tr><th>Farm no.</th><th>Supply no.</th><th>Owner</th><th>Engineer</th><th>Region</th><th className="r">Samples</th><th className="r">Latest score</th><th>Rating</th><th>Location</th></tr></thead>
-        <tbody>{shown.map(r => <tr key={r.f.id} className="click" onClick={() => go(`/farms/${r.f.id}`)}><td><b>{r.f.farm_no || '–'}</b></td><td>{r.f.supply_no || '–'}</td><td>{r.f.owner || '–'}</td><td>{r.f.engineer || '–'}</td><td>{r.f.region || '–'}</td><td className="n">{r.n}</td><td className="n"><b>{fmt(r.score, 1)}</b></td><td>{r.score !== undefined ? <Rating m={m} k={r.rating} /> : <span className="mute">–</span>}</td><td>{r.f.lat != null ? <span className="badge st-issued">GPS</span> : <span className="badge">Missing</span>}</td></tr>)}</tbody></table></div>}</Panel>
+        <tbody>{shown.map(r => <tr key={r.f.id} className="click" onClick={() => go(`/farms/${r.f.id}`)}><td><b>{r.f.farm_no || '–'}</b></td><td>{r.f.supply_no || '–'}</td><td>{r.f.owner || '–'}</td><td>{r.f.engineer || '–'}</td><td>{r.f.region || '–'}</td><td className="n">{r.n}</td><td className="n"><b>{fmt(r.score, 1)}</b></td><td>{r.score !== undefined ? <Rating m={m} k={r.rating} /> : <span className="mute">–</span>}</td><td>{r.f.lat == null ? <span className="badge">Missing</span> : r.f.loc_placeholder ? <span className="badge r-moderate">Placeholder</span> : <span className="badge st-issued">GPS</span>}</td></tr>)}</tbody></table></div>}</Panel>
       {add && <FarmForm onClose={() => setAdd(false)} />}
     </div>
   );
@@ -91,13 +92,13 @@ export function FarmDetail({ id }: { id: number }) {
   const del = () => { db.deleteFarm(id); db.audit(user.username, 'delete', 'farm', farmName(farm)); refresh(); toast('Farm deleted; its samples are kept without a farm link'); go('/farms'); };
   return (
     <div className="stack">
-      <div className="row wrap spread"><div><h1>{farmName(farm)}</h1><div className="mute" style={{ marginTop: 4 }}>{[farm.owner, farm.region, farm.emirate].filter(Boolean).join(', ') || 'No owner or region recorded'}</div></div>
+      <div className="row wrap spread"><div><h1>{farmName(farm)}</h1><div className="mute" style={{ marginTop: 4 }}>{[farm.owner, farm.region && farm.loc_placeholder ? `${farm.region} (placeholder)` : farm.region, farm.emirate].filter(Boolean).join(', ') || 'No owner or region recorded'}</div></div>
         <div className="row no-print">{rated.length > 0 && <button className="btn" onClick={() => go(`/reports?ids=${xs.map(x => x.s.id).join(',')}`)}>Print all reports</button>}<button className="btn" onClick={() => window.print()}>Print farm summary</button>{can('edit') && <button className="btn" onClick={() => setEdit(true)}>Edit farm</button>}{can('admin') && <ConfirmButton label="Delete" confirm="Delete this farm? Its samples are kept without a farm link." onYes={del} />}</div></div>
       <div className="grid g4">
         <div className="panel kpi"><div className="l">Samples</div><div className="v">{xs.length}</div><div className="s">{rated.length} scored</div></div>
         <div className="panel kpi"><div className="l">Latest score</div><div className="v">{fmt(latest(rated)?.res.score, 1)}</div><div className="s">{latest(rated) ? <Rating m={m} k={latest(rated)!.res.rating} /> : 'No scored sample'}</div></div>
         <div className="panel kpi"><div className="l">Mean score</div><div className="v">{fmt(mean(rated.map(x => x.res.score!)), 1)}</div><div className="s">{rated.length > 1 ? `Change first to latest ${fmt(rated[rated.length - 1].res.score! - rated[0].res.score!, 1)}` : 'One sample only'}</div></div>
-        <div className="panel kpi"><div className="l">Engineer</div><div className="v" style={{ fontSize: 18, lineHeight: 1.4 }}>{farm.engineer || '–'}</div><div className="s">{farm.lat != null ? `${farm.lat}, ${farm.lon}` : 'No GPS coordinate'}{farm.irrigation_source ? `, ${farm.irrigation_source}` : ''}</div></div>
+        <div className="panel kpi"><div className="l">Engineer</div><div className="v" style={{ fontSize: 18, lineHeight: 1.4 }}>{farm.engineer || '–'}</div><div className="s">{farm.lat != null ? `${farm.lat}, ${farm.lon}${farm.loc_placeholder ? ' (placeholder location)' : ''}` : 'No GPS coordinate'}{farm.irrigation_source ? `, ${farm.irrigation_source}` : ''}</div></div>
       </div>
       <div className="grid g2">
         <Panel title="Soil health score over time" sub="Each point is one sample, by date analysed">{rated.length ? <TrendLine m={m} points={rated.map(x => ({ label: x.s.analysed_on ? x.s.analysed_on.slice(2, 7) : x.s.sample_no, y: x.res.score!, note: x.s.sample_no }))} /> : <Empty title="No scored samples" />}</Panel>
@@ -329,6 +330,7 @@ function DataTab() {
       <Panel title="Backup and restore" sub="The database is a standard SQLite file. Download it to keep a copy or to move the data to another computer.">
         <div className="stack"><div className="row wrap"><button className="btn pri" onClick={backup}>Download backup (.sqlite)</button><button className="btn" onClick={() => exportSamplesCsv(data.scored, data)}>Export all samples as CSV</button></div>
           <F label="Restore from a backup file. This replaces everything on this device."><input type="file" accept=".sqlite,.db" onChange={e => restore(e.target.files?.[0])} /></F>
+          {data.farms.some(f => f.loc_placeholder) ? <div style={{ borderTop: '1px solid var(--line)', paddingTop: 14 }}><p className="small mute">{data.farms.filter(f => f.loc_placeholder).length} farms are shown at placeholder locations so the map has something to show. Remove them once surveyed coordinates are being entered.</p><button className="btn" onClick={() => { const k = db.clearPlaceholderLocations(); db.audit(user.username, 'remove', 'placeholder locations', `${k} farms`); refresh(); toast(`Placeholder locations removed from ${k} farms`); }}>Remove placeholder locations</button></div> : <div style={{ borderTop: '1px solid var(--line)', paddingTop: 14 }}><p className="small mute">Farms without coordinates can be placed at illustrative points in Abu Dhabi farming areas so the map can be demonstrated.</p><button className="btn" onClick={() => { const k = db.assignPlaceholderLocations(); db.audit(user.username, 'add', 'placeholder locations', `${k} farms`); refresh(); toast(k ? `${k} farms placed at placeholder locations` : 'Every farm already has a location'); }}>Add placeholder locations</button></div>}
           <div style={{ borderTop: '1px solid var(--line)', paddingTop: 14 }}><p className="small mute">Erasing removes the database from this browser. Download a backup first.</p><ConfirmButton label="Erase this device" confirm="Erase the whole database from this browser? This cannot be undone unless you have a backup file." onYes={async () => { await db.wipeDevice(); window.location.reload(); }} /></div></div>
       </Panel>
       <Panel title="Database tables" sub={`Dataset loaded at setup: ${db.getSetting('dataset') ?? 'unknown'}`} flush><table className="tbl dense"><thead><tr><th>Table</th><th className="r">Rows</th></tr></thead><tbody>{counts.map(c => <tr key={c.table}><td><code>{c.table}</code></td><td className="n">{c.rows.toLocaleString()}</td></tr>)}</tbody></table></Panel>

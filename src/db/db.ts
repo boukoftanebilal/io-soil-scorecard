@@ -7,7 +7,7 @@ import { DEFAULT_CROPS, Crop, WaterValues } from '../engine/agronomy';
 
 export type Role = 'admin' | 'analyst' | 'agronomist' | 'viewer';
 export interface User { id: number; username: string; name: string; role: Role; active: number; created_at: string }
-export interface Farm { id: number; farm_no: string; supply_no: string; owner: string; engineer: string; region: string; emirate: string; lat: number | null; lon: number | null; area_ha: number | null; irrigation_source: string; notes: string }
+export interface Farm { id: number; farm_no: string; supply_no: string; owner: string; engineer: string; region: string; emirate: string; lat: number | null; lon: number | null; area_ha: number | null; irrigation_source: string; notes: string; loc_placeholder: number }
 export interface Sample {
   id: number; sample_no: string; farm_id: number | null; description: string; crop_id: string; system: string; texture: string; depth_cm: number | null;
   sampled_on: string; received_on: string; analysed_on: string; lat: number | null; lon: number | null; status: 'draft' | 'reviewed' | 'issued';
@@ -23,7 +23,7 @@ export interface MethodologyRec { id: number; active: number; created_at: string
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL, name TEXT NOT NULL, role TEXT NOT NULL, salt TEXT NOT NULL, pw_hash TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS farms (id INTEGER PRIMARY KEY AUTOINCREMENT, farm_no TEXT, supply_no TEXT, owner TEXT, engineer TEXT, region TEXT, emirate TEXT, lat REAL, lon REAL, area_ha REAL, irrigation_source TEXT, notes TEXT);
+CREATE TABLE IF NOT EXISTS farms (id INTEGER PRIMARY KEY AUTOINCREMENT, farm_no TEXT, supply_no TEXT, owner TEXT, engineer TEXT, region TEXT, emirate TEXT, lat REAL, lon REAL, area_ha REAL, irrigation_source TEXT, notes TEXT, loc_placeholder INTEGER DEFAULT 0);
 CREATE TABLE IF NOT EXISTS water_samples (id INTEGER PRIMARY KEY AUTOINCREMENT, sample_no TEXT, farm_id INTEGER REFERENCES farms(id), source TEXT, sampled_on TEXT, data TEXT, notes TEXT);
 CREATE TABLE IF NOT EXISTS samples (id INTEGER PRIMARY KEY AUTOINCREMENT, sample_no TEXT UNIQUE NOT NULL, farm_id INTEGER REFERENCES farms(id), description TEXT, crop_id TEXT, system TEXT, texture TEXT, depth_cm REAL,
   sampled_on TEXT, received_on TEXT, analysed_on TEXT, lat REAL, lon REAL, status TEXT NOT NULL DEFAULT 'draft', notes TEXT, note_en TEXT, note_ar TEXT, water_id INTEGER REFERENCES water_samples(id), legacy TEXT, created_at TEXT, created_by TEXT, reviewed_by TEXT);
@@ -57,6 +57,9 @@ async function idbPut(v: Uint8Array | undefined): Promise<void> {
   return new Promise((res, rej) => { const tx = d.transaction(IDB_STORE, 'readwrite'); if (v) tx.objectStore(IDB_STORE).put(v, IDB_KEY); else tx.objectStore(IDB_STORE).delete(IDB_KEY); tx.oncomplete = () => res(); tx.onerror = () => rej(tx.error); });
 }
 
+/** Brings a database created by an earlier version up to the current schema. */
+function migrate() { try { db!.run('ALTER TABLE farms ADD COLUMN loc_placeholder INTEGER DEFAULT 0'); } catch { /* column already there */ } }
+
 export async function initEngine(wasmUrl: string) { if (!SQL) SQL = await initSqlJs({ locateFile: () => wasmUrl } as unknown as Parameters<typeof initSqlJs>[0]); }
 
 /** Opens the saved database. Returns false when this device has no database yet. */
@@ -64,7 +67,7 @@ export async function openSaved(): Promise<boolean> {
   let bytes: Uint8Array | undefined;
   try { bytes = await idbGet(); } catch { bytes = undefined; }
   if (!bytes) return false;
-  db = new SQL!.Database(bytes); db.run('PRAGMA foreign_keys = ON;'); db.run(SCHEMA);
+  db = new SQL!.Database(bytes); db.run('PRAGMA foreign_keys = ON;'); db.run(SCHEMA); migrate();
   return true;
 }
 export function createEmpty() {
@@ -77,7 +80,7 @@ export function loadBytes(bytes: Uint8Array) {
   const test = new SQL!.Database(bytes);
   const t = test.exec("SELECT name FROM sqlite_master WHERE type='table' AND name IN ('samples','users','methodologies')");
   if (!t.length || t[0].values.length < 3) { test.close(); throw new Error('This file is not a Soil Scorecard database.'); }
-  db?.close(); db = test; db.run('PRAGMA foreign_keys = ON;'); db.run(SCHEMA);
+  db?.close(); db = test; db.run('PRAGMA foreign_keys = ON;'); db.run(SCHEMA); migrate();
 }
 export const exportBytes = (): Uint8Array => db!.export();
 export async function saveNow() { if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; } if (db) await idbPut(db.export()); }
@@ -189,9 +192,9 @@ export function deleteCrop(id: string) { run('DELETE FROM crops WHERE id = ?', [
 
 // ---------------------------------------------------------------- farms
 export const listFarms = () => all<Farm>('SELECT * FROM farms ORDER BY farm_no, supply_no');
-const FARM_COLS = ['farm_no', 'supply_no', 'owner', 'engineer', 'region', 'emirate', 'lat', 'lon', 'area_ha', 'irrigation_source', 'notes'] as const;
+const FARM_COLS = ['farm_no', 'supply_no', 'owner', 'engineer', 'region', 'emirate', 'lat', 'lon', 'area_ha', 'irrigation_source', 'notes', 'loc_placeholder'] as const;
 export function saveFarm(f: Partial<Farm>): number {
-  const vals = FARM_COLS.map(c => { const v = (f as Record<string, unknown>)[c]; return v === undefined || v === '' ? (['lat', 'lon', 'area_ha'].includes(c) ? null : '') : (v as string | number | null); });
+  const vals = FARM_COLS.map(c => { const v = (f as Record<string, unknown>)[c]; if (c === 'loc_placeholder') return v ? 1 : 0; return v === undefined || v === '' ? (['lat', 'lon', 'area_ha'].includes(c) ? null : '') : (v as string | number | null); });
   if (f.id) { run(`UPDATE farms SET ${FARM_COLS.map(c => c + ' = ?').join(', ')} WHERE id = ?`, [...vals, f.id]); return f.id; }
   run(`INSERT INTO farms (${FARM_COLS.join(', ')}) VALUES (${FARM_COLS.map(() => '?').join(', ')})`, vals); return lastId();
 }
@@ -200,6 +203,39 @@ export function findFarm(supplyNo?: string, farmNo?: string): Farm | undefined {
   if (supplyNo) { const f = one<Farm>('SELECT * FROM farms WHERE supply_no = ?', [supplyNo]); if (f) return f; }
   if (farmNo) return one<Farm>('SELECT * FROM farms WHERE farm_no = ?', [farmNo]);
   return undefined;
+}
+
+// Placeholder farm locations. The laboratory reports carry no coordinates, so farms without one
+// can be placed at an illustrative point in an Abu Dhabi farming area to make the map usable.
+// These are NOT surveyed positions: each is flagged loc_placeholder = 1 and labelled as such in
+// the interface, and the flag clears as soon as real coordinates are entered for the farm.
+export const PLACEHOLDER_AREAS: { name: string; lat: number; lon: number; dLat: number; dLon: number }[] = [
+  { name: 'Al Ain', lat: 24.2, lon: 55.62, dLat: 0.1, dLon: 0.1 }, { name: 'Sweihan', lat: 24.47, lon: 55.33, dLat: 0.06, dLon: 0.08 },
+  { name: 'Al Khazna', lat: 24.17, lon: 55.11, dLat: 0.05, dLon: 0.07 }, { name: 'Al Wathba', lat: 24.2, lon: 54.74, dLat: 0.04, dLon: 0.06 },
+  { name: 'Al Rahba', lat: 24.55, lon: 54.71, dLat: 0.03, dLon: 0.04 }, { name: 'Madinat Zayed, Al Dhafra', lat: 23.68, lon: 53.71, dLat: 0.07, dLon: 0.09 },
+  { name: 'Liwa, Al Dhafra', lat: 23.12, lon: 53.77, dLat: 0.03, dLon: 0.22 }, { name: 'Ghayathi, Al Dhafra', lat: 23.84, lon: 52.81, dLat: 0.05, dLon: 0.07 },
+];
+function seeded(text: string) { let h = 2166136261; for (let i = 0; i < text.length; i++) { h ^= text.charCodeAt(i); h = Math.imul(h, 16777619); } return () => { h = (h + 0x6d2b79f5) | 0; let t = Math.imul(h ^ (h >>> 15), 1 | h); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+/** Gives every farm that has no coordinate a placeholder one. The same farm always lands in the same place. */
+export function assignPlaceholderLocations(): number {
+  const farms = all<Farm>('SELECT * FROM farms WHERE lat IS NULL OR lon IS NULL');
+  for (const f of farms) {
+    const r = seeded(`${f.supply_no}|${f.farm_no}|${f.id}`), a = PLACEHOLDER_AREAS[Math.floor(r() * PLACEHOLDER_AREAS.length)];
+    const lat = a.lat + (r() * 2 - 1) * a.dLat, lon = a.lon + (r() * 2 - 1) * a.dLon;
+    run('UPDATE farms SET lat = ?, lon = ?, region = CASE WHEN region IS NULL OR region = \'\' THEN ? ELSE region END, loc_placeholder = 1 WHERE id = ?', [Math.round(lat * 1e5) / 1e5, Math.round(lon * 1e5) / 1e5, a.name, f.id]);
+  }
+  return farms.length;
+}
+export function clearPlaceholderLocations(): number {
+  const n = one<{ n: number }>('SELECT COUNT(*) AS n FROM farms WHERE loc_placeholder = 1')!.n;
+  for (const a of PLACEHOLDER_AREAS) run('UPDATE farms SET region = \'\' WHERE loc_placeholder = 1 AND region = ?', [a.name]);
+  run('UPDATE farms SET lat = NULL, lon = NULL, loc_placeholder = 0 WHERE loc_placeholder = 1');
+  return n;
+}
+/** Runs once per database: places the Silal farms on the map with placeholder locations. */
+export function ensurePlaceholderLocations(): boolean {
+  if (getSetting('dataset') !== 'silal' || getSetting('placeholder_locations')) return false;
+  assignPlaceholderLocations(); setSetting('placeholder_locations', '1'); return true;
 }
 
 // ---------------------------------------------------------------- samples

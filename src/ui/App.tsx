@@ -19,6 +19,7 @@ export default function App() {
         await db.initEngine(BASE + 'sql-wasm.wasm');
         const has = await db.openSaved();
         if (!has || db.listUsers().length === 0) { setPhase('login'); return; }
+        if (db.ensurePlaceholderLocations()) await db.saveNow();
         let uid: string | null = null; try { uid = sessionStorage.getItem('io-ssc-user'); } catch { /* storage unavailable */ }
         const u = uid ? db.listUsers().find(x => String(x.id) === uid && x.active) : undefined;
         if (u) { setUser(u); setData(loadData()); setPhase('app'); } else setPhase('login');
@@ -82,7 +83,7 @@ function Login({ onDone }: { onDone: (u: db.User) => void }) {
           setBusy('Loading the soil database…');
           await db.wipeDevice(); db.createEmpty();
           const r = db.loadSeed(seed, uname);
-          db.setSetting('dataset', 'silal');
+          db.setSetting('dataset', 'silal'); db.ensurePlaceholderLocations();
           const id = await db.createUser({ username: uname, name: fullName, role: 'admin', password: p });
           db.audit(uname, 'load', 'dataset', 'silal', `${r.samples} samples, ${r.farms} farms`);
           await db.saveNow();
