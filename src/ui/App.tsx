@@ -29,7 +29,7 @@ export default function App() {
 
   const refresh = useCallback(() => { setData(loadData()); db.scheduleSave(); }, []);
   const toast = useCallback((msg: string, isErr?: boolean) => { setToast({ msg, err: isErr }); setTimeout(() => setToast(null), isErr ? 6000 : 3200); }, []);
-  const enter = (u: db.User) => { try { sessionStorage.setItem('io-ssc-user', String(u.id)); } catch { /* ignore */ } setUser(u); setData(loadData()); setPhase('app'); };
+  const enter = (u: db.User) => { try { sessionStorage.setItem('io-ssc-user', String(u.id)); } catch { /* ignore */ } if (db.ensurePlaceholderLocations()) db.scheduleSave(); setUser(u); setData(loadData()); setPhase('app'); };
   const logout = useCallback(() => { try { sessionStorage.removeItem('io-ssc-user'); } catch { /* ignore */ } setUser(null); setPhase('login'); go('/'); }, []);
   const state = useMemo<AppState | null>(() => (user && data ? { data, user, refresh, toast, logout, can: p => PERMS[user.role]?.includes(p) ?? false } : null), [user, data, refresh, toast, logout]);
 
